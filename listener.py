@@ -13,7 +13,7 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 
 @app.route('/')
 def home():
-    return "<h1>ERENBABA LISTENER AKTIF</h1>", 200
+    return "<h1>ERENBABA PROXY AKTIF</h1>", 200
 
 # --- ADMIN SCANNER ENDPOINT ---
 @app.route('/scan', methods=['GET'])
@@ -43,3 +43,4 @@ def scan():
 if __name__ == '__main__':
     # Render için port ayarı
     app.run(host='0.0.0.0', port=10000)
+
