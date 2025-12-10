@@ -1,6 +1,4 @@
-Flask
-Flask-Cors
-gunicorn
-curl_cffi
+flask
+flask-cors
+curl-cffi
 requests
-datetime
