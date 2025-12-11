@@ -1,93 +1,75 @@
-import time
-import random
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify
 from flask_cors import CORS
-from curl_cffi import requests as cffi_requests
+import requests
+import time
 
 app = Flask(__name__)
-CORS(app)  # Cross-Origin hatalarını engelle
 
-# --- GÜVENLİK DUVARI BYPASS AYARLARI ---
-# Bu User-Agent ve Impersonate ayarları sayesinde
-# Cloudflare ve benzeri korumalar isteği gerçek bir insan sanar.
-BROWSER_PROFILES = [
-    "chrome120",
-    "chrome119",
-    "safari17_2",
-    "edge101"
-]
+# CORS ayarları: Her yerden gelen isteklere izin ver (Vercel için şart)
+CORS(app)
 
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0"
-]
+# Bulunan admin panellerini burada tutacağız (RAM'de)
+found_panels = []
 
+# 1. Ana Sayfa (Sunucunun çalıştığını anlamak için)
 @app.route('/')
-def index():
-    # Frontend arayüzünü yükler
-    return render_template('index.html')
+def home():
+    return jsonify({"message": "Erenbaba Admin Hunter Listener is ONLINE", "status": "running"})
 
-@app.route('/check_path', methods=['POST'])
-def check_path():
-    """
-    Frontend'den gelen URL'i kontrol eder.
-    Gerçek bir tarayıcı taklidi yapar.
-    """
-    data = request.json
-    target_url = data.get('url')
+# 2. Ping (Render sunucusunu uyanık tutmak için)
+@app.route('/ping')
+def ping():
+    return jsonify({"status": "pong"})
 
-    if not target_url:
-        return jsonify({'error': 'URL girilmedi'}), 400
-
-    # Rastgele bir tarayıcı kimliği seç
-    profile = random.choice(BROWSER_PROFILES)
-    user_agent = random.choice(USER_AGENTS)
-
-    headers = {
-        'User-Agent': user_agent,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Referer': 'https://google.com'
-    }
+# 3. Tarama Fonksiyonu (Esas İş)
+@app.route('/scan', methods=['GET'])
+def scan():
+    url = request.args.get('url')
+    
+    if not url:
+        return jsonify({"error": "URL parametresi gerekli"}), 400
 
     try:
-        # --- KRİTİK NOKTA: REQUEST ---
-        # impersonate parametresi TLS parmak izini değiştirir.
-        # Bu sayede WAF'lar (Web Application Firewall) bizi script olarak algılayamaz.
-        response = cffi_requests.get(
-            target_url,
-            impersonate=profile,
-            headers=headers,
-            timeout=8,
-            allow_redirects=True
-        )
-
+        # Siteye gerçek bir kullanıcı gibi istek atalım
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        # Timeout 5 saniye (Çok bekletmesin)
+        response = requests.get(url, headers=headers, timeout=5, allow_redirects=False)
+        
         status_code = response.status_code
         
-        # Sonuç analizi
-        result = {
-            "url": target_url,
-            "status": status_code,
-            "found": False
-        }
+        # Eğer panel bulunduysa (200) veya yasaklıysa (403), loglara ekle
+        if status_code in [200, 403]:
+            log_entry = {
+                "id": len(found_panels) + 1,
+                "url": url,
+                "status": status_code,
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+            }
+            # Aynı URL zaten yoksa ekle
+            if not any(p['url'] == url for p in found_panels):
+                found_panels.append(log_entry)
 
-        # 200 (Açık), 403 (Yasaklı ama var), 401 (Şifreli ama var), 302 (Yönlendirme)
-        if status_code in [200, 301, 302, 401, 403]:
-            result["found"] = True
-        
-        return jsonify(result)
-
-    except Exception as e:
-        # Bağlantı hatası olsa bile script durmasın
         return jsonify({
-            "url": target_url,
-            "status": 0,
-            "error": str(e),
-            "found": False
+            "url": url,
+            "status": status_code,
+            "found": status_code in [200, 403]
         })
 
+    except requests.exceptions.RequestException as e:
+        # Siteye ulaşılamadıysa
+        return jsonify({
+            "url": url,
+            "status": 0,
+            "error": str(e)
+        })
+
+# 4. Logları Getir (Frontend tablosu için)
+@app.route('/logs', methods=['GET'])
+def get_logs():
+    return jsonify(found_panels)
+
 if __name__ == '__main__':
-    print("🚀 ErenBaba Admin Finder Başlatıldı...")
-    print("🌍 Server: http://127.0.0.1:5000")
-    app.run(debug=True, port=5000)
+    app.run(host='0.0.0.0', port=10000)
